@@ -1,0 +1,365 @@
+;P - Pause, R - Reset, S - Split
+;REGISTER USAGE:
+; R0 - General purpose register
+; R1 - Seconds
+; R2 - Minutes
+; R3 - Split Index
+;-----------------------------------;
+;VARIABLES
+      MOV R1, #0        ;Seconds
+      MOV R2, #0        ;Minutes
+      MOV R3, #0        ;Split Number
+;____________________________________________________INTERRUPT ASSIGNMENTS________________________________________________________________;
+;---------------------TIMER INTERRUPT-------------------------;	;every "interrupt frequency line 14" runs PrintCheck function
+      MOV R0, #PrintCheck ;stores function to be called 
+      STR R0, .ClockISR ;stores interrupt function
+      MOV R0, #1000     ;sets interrupt frequency in ms
+      STR R0, .ClockInterruptFrequency ;stores interrupt frequency in ms
+;
+;----------------------KEYBOARD INTERRUPT----------------------; ;runs KeyInputs when key is pressed - enables interrupts
+      MOV R0, #KeyInputs
+      STR R0, .KeyboardISR
+      MOV R0, #1
+      STR R0, .KeyboardMask
+      STR R0, .InterruptRegister
+;
+;___________________________________________________________MAIN___________________________________________________________________________;
+Stopwatch:              ;keeps iterating through this loop until an interrupt is called
+      B Stopwatch
+;
+;__________________________________________________CLOCK INTERRUPT HANDLER_________________________________________________________________;
+;-----------------PRINT FUNCTION-------------------; ;centers and prints the current time
+PrintCheck:
+      MOV R0, #center
+      STR R0, .WriteString
+      MOV R0, #colon
+      STR R2, .WriteSignedNum
+      STR R0, .WriteString
+      STR R1, .WriteSignedNum
+      MOV R0, #nextline
+      STR R0, .WriteString
+      STR R0, .WriteString
+SecondsCheck:
+;--------------CHECK SECONDS FUNCTION---------------; ;increments the second variable and checks if minutes needs to be incremented
+      ADD R1, R1, #1 
+      CMP R1, #59 
+      BEQ MinutesCheck
+      RFE
+;--------------CHECK MINUTES FUNCTION---------------;	;increments the minutes variable and reset the seconds variable
+MinutesCheck:
+      ADD R2, R2, #1
+      MOV R1, #0
+      RFE
+;
+;_________________________________________________INPUT INTERRUPT HANDLER___________________________________________________________________;
+;----------------INPUTS FUNCTION---------------; ;Records last input pressed to branch into timer operations then resets (split, stop etc.)
+KeyInputs:
+      LDR R0, .LastKeyAndReset
+      CMP R0, #80       ;If "p" is pressed the pause function is called
+      BEQ Pause 
+      CMP R0, #82       ;if "r" is pressed the reset function is called
+      BEQ Reset
+      CMP R0, #83       ;if "s" is pressed the split function is called
+      BEQ SplitDisplay
+;
+      RFE               ;stops interrupt handler from stopping when timer is started again using "p"
+;-----------------STOP/START FUNCTION--------------; Records last pressed key to determine if user wants to continue timer then resets
+Pause:
+      MOV R0, #0
+      STR R0,.InterruptRegister ;Stops the interrupt register
+      PUSH {R4, R5, R6}
+PauseLoop:
+      MOV R7, #0
+      MOV R4, #80 
+      LDR R5, .LastKeyAndReset
+      CMP R5, #82       ;Calls reset function if "r" is pressed     
+      BEQ Reset
+      CMP R5, #83       ;if "s" is pressed the savedSplitArray function is called
+      BEQ DisplaySplitArrayCheck
+      CMP R5, R4        ;Resumes if "p" is pressed
+      BNE PauseLoop
+Resume:
+      MOV R0, #1
+      STR R0,.InterruptRegister
+      MOV R3, #0        ;Reset the split index to display earliest split time after resuming and pausing again
+      POP {R4, R5, R6}
+      B Stopwatch
+;------------------RESET FUNCTION---------------;	;sets minutes and seconds variable to 0 and 
+Reset:
+      MOV R1, #0
+      MOV R2, #0
+      MOV R3, #0
+      MOV R0, #nextline
+      STR R0, .WriteString
+      MOV R0, #center1
+      STR R0, .WriteString
+      MOV R0, #reset
+      STR R0, .WriteString
+      MOV R0, #nextline
+      STR R0, .WriteString
+      MOV R0, #0        ;used to reset splits
+ResetSplits:
+      MOV R4, #splitTimesArr ;move the location of split times array into r4
+      STR R0, [R4]      ;store 0 into minutes
+      ADD R4, R4, #4    ;increments to seconds
+      STR R0, [R4]      ;store 0 into seconds
+      ADD R6, R6, #1    ;each loop will increment r6 by 1
+      CMP R6, #5
+      BNE ResetSplits   ;reset all 5 splits by looping 5 times
+      MOV R6, #0        ;stops ResetSplits function from looping after second calling of reset by resetting R6 back to 0
+      MOV R0, #0
+      STR R0, NoMoreSplitIndex
+      STR R0, splitIndex
+      B Pause
+;----------------SPLIT FUNCTION-----------------; ;displays splits, saves splits, updates indexes based on amount of splits
+SplitDisplay:
+      PUSH {R5, R6}
+      MOV R0, #center
+      STR R0, .WriteString
+      MOV R0, #splittime
+      STR R0, .WriteString
+      MOV R0, #nextline
+      STR R0, .WriteString
+      MOV R0, #center
+      STR R0, .WriteString
+      MOV R0, #colon
+      STR R2, .WriteSignedNum
+      STR R0, .WriteString
+      STR R1, .WriteSignedNum
+      MOV R0, #nextline
+      STR R0, .WriteString
+      STR R0, .WriteString
+;
+PushSplitDownArr:       ;push the earliest splits down the array like a stack
+      MOV R6, #splitTimesArr
+      LDR R5, [R6, #28]
+      STR R5, [R6, #36]
+      LDR R5, [R6, #24]
+      STR R5, [R6, #32]
+      LDR R5, [R6, #20]
+      STR R5, [R6, #28]
+      LDR R5, [R6, #16]
+      STR R5, [R6, #24]
+      LDR R5, [R6, #12]
+      STR R5, [R6, #20]
+      LDR R5, [R6, #8]
+      STR R5, [R6, #16]
+      LDR R5, [R6, #4]
+      STR R5, [R6, #12]
+      LDR R5, [R6, #0]
+      STR R5, [R6, #8]
+;
+SaveSplit:
+      MOV R0, #splitTimesArr ;Load the split times array into r0
+      STR R2, [R0]      ; Store the minutes (R2) at the split index in the array
+      STR R1, [R0, #4]  ; Store the seconds (R1) at the split index + 4 in the array
+UpdateIndexes:
+      LDR R0, NoMoreSplitIndex ;increment NoMoreSplitIndex so only saved splits are printed
+      ADD R0, R0, #1
+      STR R0, NoMoreSplitIndex
+      POP {R5, R6}
+      RFE
+;--------DISPLAY SPLIT ARRAY FUNCTION---------;	;reads savedsplit index and displays splits from earliest to latest
+DisplaySplitArrayCheck:
+      LDR R0, NoMoreSplitIndex ;prevents the displaying of unsaved splits
+;
+      CMP R7, #3        ;used to prevent loops caused by resetsavedsplitindex that occurs when resetting and pressing "s" for split
+      BEQ PauseLoop
+      CMP R0, #0
+      BEQ ResetSavedSplitIndex
+      CMP R3, #0
+      BEQ DisplaySplitArray1
+      CMP R0, #1
+      BEQ ResetSavedSplitIndex
+      CMP R3, #1
+      BEQ DisplaySplitArray2
+      CMP R0, #2
+      BEQ ResetSavedSplitIndex
+      CMP R3, #2
+      BEQ DisplaySplitArray3
+      CMP R0, #3
+      BEQ ResetSavedSplitIndex
+      CMP R3, #3
+      BEQ DisplaySplitArray4
+      CMP R0, #4
+      BEQ ResetSavedSplitIndex
+      CMP R3, #4
+      BEQ DisplaySplitArray5
+      RFE
+ResetSavedSplitIndex:
+      MOV R3, #0
+      ADD R7, R7, #1
+      B DisplaySplitArrayCheck
+DisplaySplitArray1:
+      PUSH {R4, R5, R6} ;R4 = increment memory location, R5 = split memory location, R6 = next split location
+      ADD R3, R3, #1    ;moves on to the next split display if s is pressed again
+      MOV R6, #8        ;set up the display for next split time
+      MOV R0, #SavedSplitIndex 
+      STR R6, [R0]      ;save split index into memory at SavedSplitIndex
+      MOV R4, #4        ;access seconds location in splitTimesArr
+      MOV R5, #splitTimesArr
+;
+      MOV R0, #nextline
+      STR R0, .WriteString
+      MOV R0, #center2
+      STR R0, .WriteString
+      MOV R0, #displaysplittime1
+      STR R0, .WriteString
+      MOV R0, #center
+      STR R0, .WriteString
+;
+      LDR R0, [R5]      ;load split times array into r0
+      STR R0, .WriteSignedNum ;print the minutes
+      MOV R0, #colon
+      STR R0, .WriteString
+      LDR R0, [R5, R4]  ;load split times +#4 which is the seconds display into r0
+      STR R0, .WriteSignedNum ;print the seconds 
+;
+      MOV R0, #nextline
+      STR R0, .WriteString
+      STR R0, .WriteString
+      POP {R4, R5, R6}
+      B PauseLoop
+DisplaySplitArray2:
+      PUSH {R4, R5, R6, R7} ;R4 = increment memory location, R5 = split memory location, R6 = next split location R7 = split location in arr
+      ADD R3, R3, #1    ;moves on to the next split display if s is pressed again
+      LDR R7, SavedSplitIndex ;Loads the split index into R7 used to locate the second minutes
+      ADD R4, R7, #4    ;access the seconds location in splitTimesArr
+      MOV R6, #16       ;display the next split time
+      MOV R0, #SavedSplitIndex 
+      STR R6, [R0] 
+      MOV R5, #splitTimesArr
+;
+      MOV R0, #center2
+      STR R0, .WriteString
+      MOV R0, #displaysplittime2
+      STR R0, .WriteString
+      MOV R0, #center
+      STR R0, .WriteString
+;
+      LDR R0, [R5, R7]  ;load split times using the location of SavedSplitIndex and splitTimesArr array into r0
+      STR R0, .WriteSignedNum ;print the minutes
+      MOV R0, #colon
+      STR R0, .WriteString
+      LDR R0, [R5, R4]  ;load split times +#4 which is the seconds display into r0
+      STR R0, .WriteSignedNum ;print the seconds
+      MOV R0, #nextline
+      STR R0, .WriteString
+      STR R0, .WriteString
+      POP {R4, R5, R6, R7}
+      B PauseLoop
+DisplaySplitArray3:
+      PUSH {R4, R5, R6, R7} ;R4 = increment memory location, R5 = split memory location, R6 = next split location R7 = split location in arr
+      ADD R3, R3, #1    ;moves on to the next split display if s is pressed again
+      LDR R7, SavedSplitIndex ;Loads the split index into R7 to locate the third minutes
+      ADD R4, R7, #4    ;access the seconds location in splitTimesArr
+      MOV R6, #24       ;display the next split time
+      MOV R0, #SavedSplitIndex 
+      STR R6, [R0]
+      MOV R5, #splitTimesArr
+;
+      MOV R0, #center2
+      STR R0, .WriteString
+      MOV R0, #displaysplittime3
+      STR R0, .WriteString
+      MOV R0, #center
+      STR R0, .WriteString
+;
+      LDR R0, [R5, R7]  ;load split times using the location of SavedSplitIndex and splitTimesArr array into r0
+      STR R0, .WriteSignedNum ;print the minutes
+      MOV R0, #colon
+      STR R0, .WriteString
+      LDR R0, [R5, R4]  ;load split times +#4 which is the seconds display into r0
+      STR R0, .WriteSignedNum ;print the seconds
+      MOV R0, #nextline
+      STR R0, .WriteString
+      STR R0, .WriteString
+      POP {R4, R5, R6, R7}
+      B PauseLoop
+DisplaySplitArray4:
+      PUSH {R4, R5, R6, R7} ;R4 = increment memory location, R5 = split memory location, R6 = next split location R7 = split location in arr
+      ADD R3, R3, #1    ;moves on to the next split display if s is pressed again
+      LDR R7, SavedSplitIndex ;Loads the split index into R7 to locate the fourth minutes
+      ADD R4, R7, #4    ;access the seconds location in splitTimesArr
+      MOV R6, #32       ;display the next split time
+      MOV R0, #SavedSplitIndex 
+      STR R6, [R0] 
+      MOV R5, #splitTimesArr
+;
+      MOV R0, #center2  ;centers and prints split time number
+      STR R0, .WriteString
+      MOV R0, #displaysplittime4
+      STR R0, .WriteString
+      MOV R0, #center
+      STR R0, .WriteString
+;
+      LDR R0, [R5, R7]  ;load split times using the location of SavedSplitIndex and splitTimesArr array into r0
+      STR R0, .WriteSignedNum ;print the minutes
+      MOV R0, #colon
+      STR R0, .WriteString
+      LDR R0, [R5, R4]  ;load split times +#4 which is the seconds display into r0
+      STR R0, .WriteSignedNum ;print the seconds
+      MOV R0, #nextline
+      STR R0, .WriteString
+      STR R0, .WriteString
+      POP {R4, R5, R6, R7}
+      B PauseLoop
+DisplaySplitArray5:
+      PUSH {R4, R5, R6, R7} ;R4 = increment memory location, R5 = split memory location, R6 = next split location R7 = split location in arr
+      MOV R3, #0        ;reset split index
+      LDR R7, SavedSplitIndex ;Loads the split index into R7 to locate the fifth minutes
+      ADD R4, R7, #4    ;access the seconds location in splitTimesArr
+      MOV R0, #SavedSplitIndex 
+      MOV R5, #splitTimesArr
+;
+      MOV R0, #center2
+      STR R0, .WriteString
+      MOV R0, #displaysplittime5
+      STR R0, .WriteString
+      MOV R0, #center
+      STR R0, .WriteString
+;
+      LDR R0, [R5, R7]  ;load split times using the location of SavedSplitIndex and splitTimesArr array into r0
+      STR R0, .WriteSignedNum ;print the minutes
+      MOV R0, #colon
+      STR R0, .WriteString
+      LDR R0, [R5, R4]  ;load split times +#4 which is the seconds display into r0
+      STR R0, .WriteSignedNum ;print the seconds
+      MOV R0, #nextline
+      STR R0, .WriteString
+      STR R0, .WriteString
+      POP {R4, R5, R6, R7}
+      B PauseLoop
+;
+;___________________________________________________________________________________________________________________________________________;
+;CONSTANTS
+center: .ASCIZ "                  "
+center1: .ASCIZ "               "
+center2: .ASCIZ "                 "
+colon: .ASCIZ ":"
+nextline: .ASCIZ "\n"
+reset: .ASCIZ "TIMER RESET\n"
+splittime: .ASCIZ "SPLIT " ;used to confirm split was saved
+;
+displaysplittime1: .ASCIZ "SPLIT 1\n"
+displaysplittime2: .ASCIZ "SPLIT 2\n"
+displaysplittime3: .ASCIZ "SPLIT 3\n"
+displaysplittime4: .ASCIZ "SPLIT 4\n"
+displaysplittime5: .ASCIZ "SPLIT 5\n"
+;
+splitIndex: .WORD 0     ;used to increment to next split save
+SavedSplitIndex: .WORD 0 ;used to increment to the next split display
+NoMoreSplitIndex: .WORD 0 ;used to check if there are anymore saved splits
+;
+;ARRAYS
+splitTimesArr: .WORD 0  ;location where the splits are saved even = minutes, odd = seconds
+      0
+      0
+      0
+      0
+      0
+      0
+      0
+      0
+      0
+      0
